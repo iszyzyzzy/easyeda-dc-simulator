@@ -24,7 +24,23 @@ class SolverTests(unittest.TestCase):
   with self.assertRaisesRegex(ValueError,'Mesh too large'):solve(board(),c)
  def test_via(self):
   p=board();p['layers'].append({'id':'2','thickness_um':35});c=copy.deepcopy(p['copper'][0]);c['layer']='2';p['copper'].append(c);p['pins'][1]['layer']='2';p['vias']=[{'net':'V','x':5.25,'y':.25,'diameter_mm':.4,'drill_mm':.2,'plating_um':25,'length_mm':1.6,'layers':['1','2']}]
-  r=solve(p,cfg());self.assertGreater(r['via_loss_w'],0);self.assertAlmostEqual(r['source_current_a'],1,places=8)
+  c=cfg();c['grid_mm']=.1
+  r=solve(p,c);self.assertGreater(r['via_loss_w'],0);self.assertAlmostEqual(r['source_current_a'],1,places=8)
+  for layer in r['layers']:self.assertIsNone(layer['voltage_v'][2][52])
+ def test_trace_crossing_drill(self):
+  p=board();p['copper'][0]['holes']=[[[4,0],[6,0],[6,1],[4,1]]]
+  p['copper'].append({'net':'V','layer':'1','polygon':[[3,0],[7,0],[7,1],[3,1]]})
+  # 铺铜避让内允许独立走线；物理钻孔则必须切断这条走线。
+  self.assertGreater(solve(p,cfg())['total_loss_w'],0)
+  p['drills']=[{'layers':['1'],'polygon':[[4.5,0],[5.5,0],[5.5,1],[4.5,1]]}]
+  with self.assertRaisesRegex(ValueError,'Disconnected'):solve(p,cfg())
+ def test_legacy_via_drill_affects_other_nets(self):
+  p=board();p['vias']=[{'net':'OTHER','x':5,'y':.5,'drill_mm':1.5,'layers':['1','2']}]
+  with self.assertRaisesRegex(ValueError,'Disconnected'):solve(p,cfg())
+ def test_explicit_drill_contours_are_authoritative(self):
+  p=board();p['vias']=[{'net':'OTHER','x':5,'y':.5,'drill_mm':1.5,'layers':['1','2']}]
+  p['drills']=[{'layers':['2'],'polygon':[[4,0],[6,0],[6,1],[4,1]]}]
+  self.assertGreater(solve(p,cfg())['total_loss_w'],0)
  def test_thermal(self):
   c=cfg();c['thermal_resistance_k_w']=10;r=solve(board(),c);self.assertAlmostEqual(r['estimated_temperature_rise_k'],r['total_loss_w']*10)
  def test_bad_import(self):

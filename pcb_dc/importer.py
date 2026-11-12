@@ -127,7 +127,7 @@ def convert(text,name='PCB'):
  if len(pcbs)!=1:raise ImportErrorDetail(f'Expected one PCB document, found {len(pcbs)}')
  rr={(t,i):v for (t,i),(_,v) in pcbs[0]['records'].items() if v is not None}
  bytype=lambda typ:[(i,v) for (t,i),v in rr.items() if t==typ]
- out={'units':'mm','name':name,'layers':[],'copper':[],'pins':[],'vias':[],'warnings':[],'validation_errors':[],'validation_errors_by_net':{}}
+ out={'units':'mm','name':name,'layers':[],'copper':[],'pins':[],'vias':[],'drills':[],'warnings':[],'validation_errors':[],'validation_errors_by_net':{}}
  def warn(s):
   if s not in out['warnings']:out['warnings'].append(s)
  def error(s,net=None):
@@ -186,6 +186,15 @@ def convert(text,name='PCB'):
  def pad(pid,v,component=None,compid=None):
   comp=component or {};bottom=comp.get('layerId')==2;x=v.get('centerX',0);y=v.get('centerY',0);num=str(v.get('num',''));net=v.get('netName','')
   if compid:net=mappings.get((compid,num,pid),mappings.get((compid,num,None),net))
+  # 物理钻孔独立于网络，必须在无网络焊盘提前返回前保留下来。
+  raw_hole=v.get('hole')
+  if raw_hole:
+   raw_hole=raw_hole if isinstance(raw_hole,dict) else dict(zip(['holeType','width','height'],raw_hole))
+   d=raw_hole.get('width',0)
+   if raw_hole.get('holeType') not in ('ROUND','CIRCLE') or d!=raw_hole.get('height') or d<=0:raise ImportErrorDetail('Unsupported physical drill geometry')
+   hole_poly=transform(circle(v.get('padOffsetX',0),v.get('padOffsetY',0),d/2),x,y,v.get('padAngle',0))
+   hole_poly=transform(hole_poly,comp.get('x',comp.get('positionX',0)),comp.get('y',comp.get('positionY',0)),comp.get('angle',0),bottom)
+   out['drills'].append({'layers':lids,'polygon':[[px*MIL,py*MIL] for px,py in hole_poly]})
   if not net:return
   p=v.get('defaultPad',{});p=p if isinstance(p,dict) else dict(zip(['padType','width','height','cornerRadius'],p))
   w=p.get('width',p.get('diameter',0));h=p.get('height',w);kind=p.get('padType')
@@ -234,35 +243,66 @@ def convert(text,name='PCB'):
     try:pad(i,v,c,cid)
     except (ValueError,TypeError,KeyError,IndexError) as e:error(f'Unsupported footprint PAD {cid}:{i}: {e}')
  for i,v in bytype('VIA'):
-  if v.get('netName'):error(f'VIA {i}: via span rules not yet resolved; refusing through-hole assumption.',v.get('netName'))
+  # 未解析跨度的孔也可能穿过其他网络；仅按本孔网络阻断会漏掉物理孔。
+  error(f'VIA {i}: physical drill span rules not yet resolved; cannot safely mask all affected layers.')
  for (typ,i),v in rr.items():
   if typ not in ('PAD','VIA','LINE','ARC','CARC','POLY','FILL','TEARDROP','POUR','POURED') and v.get('netName') and str(v.get('layerId')) in lids:error(f'Unrecognised conductive primitive {typ} {i}',v.get('netName'))
  warn('Experimental importer: verify geometry against EDA; curves discretised at <=4 degrees. Saved pours may be stale; repour before export.')
  return out
 
-def load_project(path):
- p=Path(path)
- if p.is_dir():
-  root=p;files=sorted(root.glob('pcb/*.epcb2'))
-  if len(files)!=1:raise ImportErrorDetail(f'Found {len(files)} PCB files; select a specific .epcb2 file')
-  p=files[0]
- data=p.read_bytes()
- # Content takes precedence: a single archive may use a project extension.
- if not zipfile.is_zipfile(io.BytesIO(data)) and p.suffix.lower()=='.eprj3':
-  try:index=json.loads(data.decode('utf-8-sig'))
-  except (ValueError,UnicodeError):index=None
-  if isinstance(index,dict) and index.get('format')=='folder':
-   files=sorted(p.parent.glob('pcb/*.epcb2'))
-   if len(files)!=1:raise ImportErrorDetail(f'Folder-format index needs its sibling pcb/ documents; found {len(files)} PCB files. Select one .epcb2 or the complete project archive.')
-   return load_project(files[0])
- return load_project_bytes(data,p.name)
-def load_project_bytes(data,filename='board.epcb2'):
+def project_boards(path):
+ """Discover native pcb/ files, optionally one level of project directories."""
+ p=Path(path).expanduser()
+ if not p.exists():raise ImportErrorDetail('Project path does not exist: '+str(p))
+ if p.is_file():
+  if p.stat().st_size>100_000_000:raise ImportErrorDetail('Project file larger than 100 MB')
+  if p.suffix.lower()=='.epcb2':return [p.resolve()]
+  if p.suffix.lower()!='.eprj3':return []
+  if zipfile.is_zipfile(p):return []
+  try:index=json.loads(p.read_text(encoding='utf-8-sig'))
+  except (ValueError,UnicodeError):return []
+  if not isinstance(index,dict) or index.get('format')!='folder':return []
+  p=p.parent
+ root=p.resolve();found=[]
+ # Do not recursively sweep backups or arbitrary directories.
+ dirs=[root]+[d for d in root.iterdir() if d.is_dir() and not d.is_symlink() and any(d.glob('*.eprj3'))]
+ for d in dirs:
+  pcb=d/'pcb'
+  if not pcb.is_dir():continue
+  for f in pcb.iterdir():
+   if f.is_file() and f.suffix.lower()=='.epcb2' and not f.is_symlink() and f.resolve().is_relative_to(root):found.append(f)
+ return sorted(found,key=lambda x:str(x).casefold())
+def project_choices(path):
+ p=Path(path).expanduser();root=(p if p.is_dir() else p.parent).resolve()
+ return [str(f.relative_to(root)).replace('\\','/') for f in project_boards(path)]
+def archive_choices(data):
+ if not zipfile.is_zipfile(io.BytesIO(data)):return []
+ with zipfile.ZipFile(io.BytesIO(data)) as z:
+  names=[n for n in z.namelist() if n.lower().endswith('.epcb2') and not n.endswith('/')]
+  if len(names)!=len(set(names)):raise ImportErrorDetail('Archive has duplicate PCB paths')
+  return sorted(names)
+def load_project(path,board=None):
+ p=Path(path).expanduser()
+ if not p.exists():raise ImportErrorDetail('Project path does not exist: '+str(p))
+ choices=project_choices(p)
+ if choices:
+  if board is None and len(choices)>1:raise ImportErrorDetail('Multiple PCBs found; choose one: '+', '.join(choices))
+  selected=board if board is not None else choices[0]
+  if selected not in choices:raise ImportErrorDetail('PCB selection is not in this project')
+  root=p if p.is_dir() else p.parent;p=root/selected
+ elif p.is_dir():raise ImportErrorDetail('No pcb/*.epcb2 found in this directory or its immediate project subdirectories')
+ if p.stat().st_size>100_000_000:raise ImportErrorDetail('Project file larger than 100 MB')
+ return load_project_bytes(p.read_bytes(),p.name,board if not choices else None)
+def load_project_bytes(data,filename='board.epcb2',board=None):
  if zipfile.is_zipfile(io.BytesIO(data)):
   with zipfile.ZipFile(io.BytesIO(data)) as z:
-   names=[n for n in z.namelist() if n.lower().endswith('.epcb2')]
-   if len(names)!=1:raise ImportErrorDetail(f'Archive has {len(names)} PCB files; select one .epcb2')
-   if z.getinfo(names[0]).file_size>100_000_000:raise ImportErrorDetail('PCB larger than 100 MB')
-   return convert(z.read(names[0]).decode('utf-8-sig'),names[0])
+   names=archive_choices(data)
+   if not names:raise ImportErrorDetail('Archive contains no .epcb2 files')
+   if board is None and len(names)!=1:raise ImportErrorDetail(f'Archive has {len(names)} PCB files; choose one')
+   selected=board if board is not None else names[0]
+   if selected not in names:raise ImportErrorDetail('PCB selection is not in this archive')
+   if z.getinfo(selected).file_size>100_000_000:raise ImportErrorDetail('PCB larger than 100 MB')
+   return convert(z.read(selected).decode('utf-8-sig'),selected)
  if filename.lower().endswith('.eprj3'):
   try:index=json.loads(data.decode('utf-8-sig'))
   except (ValueError,UnicodeError):index=None

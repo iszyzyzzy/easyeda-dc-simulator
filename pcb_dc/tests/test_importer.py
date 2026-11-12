@@ -16,7 +16,7 @@ class ImporterTests(unittest.TestCase):
   s=rec('DOCHEAD','',{'docType':'PCB'})+rec('POUR','p',{'netName':'GND','layerId':1,'path':[['R',0,0,20,10,0]]})
   d=convert(s);self.assertEqual(d['copper'],[]);self.assertTrue(d['validation_errors_by_net'].get('GND'))
  def test_via_blocks(self):
-  d=convert(rec('DOCHEAD','',{'docType':'PCB'})+rec('VIA','v',{'netName':'GND'}));self.assertTrue(d['validation_errors_by_net'].get('GND'));self.assertEqual(d['validation_errors'],[])
+  d=convert(rec('DOCHEAD','',{'docType':'PCB'})+rec('VIA','v',{'netName':'GND'}));self.assertTrue(d['validation_errors']);self.assertIn('physical drill span',d['validation_errors'][0])
  def test_delete(self):
   d=records(rec('DOCHEAD','',{'docType':'PCB'})+rec('LINE','a',{'x':2})+rec('LINE','a',None,2));self.assertIsNone(d[0]['records'][('LINE','a')][1])
  def test_index_rejected(self):
@@ -64,4 +64,10 @@ class ImporterTests(unittest.TestCase):
    self.assertEqual(load_project(p)['units'],'mm')
  def test_unknown_eprj3_not_claimed_incomplete(self):
   with self.assertRaisesRegex(ImportErrorDetail,'Unrecognised standalone'):load_project_bytes(b'unknown data','x.eprj3')
+ def test_no_net_npth_preserved(self):
+  s=rec('DOCHEAD','',{'docType':'PCB'})+rec('PAD','mount',{'centerX':50,'centerY':60,'layerId':12,'hole':['ROUND',20,20]})
+  d=convert(s);self.assertFalse(d['validation_errors']);self.assertEqual(len(d['drills']),1);self.assertEqual(d['pins'],[]);self.assertEqual(set(d['drills'][0]['layers']),{'1','2'});self.assertAlmostEqual(max(x for x,y in d['drills'][0]['polygon']),60*MIL)
+ def test_pth_preserved_as_physical_hole(self):
+  s=rec('DOCHEAD','',{'docType':'PCB'})+rec('PAD','pth',{'centerX':0,'centerY':0,'layerId':12,'netName':'VCC','defaultPad':['ELLIPSE',40,40],'hole':['ROUND',20,20],'plated':True})
+  d=convert(s);self.assertFalse(d['validation_errors']);self.assertEqual(len(d['drills']),1);self.assertEqual(len(d['vias']),1)
 if __name__=='__main__':unittest.main()

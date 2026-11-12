@@ -24,9 +24,9 @@ python app.py
 
 官方文档描述的 **文件夹格式** `.eprj3`（JSON 中 `format: "folder"`）是项目索引，实际 PCB 位于 `pcb/*.epcb2`，仅上传这种索引不能得到铜皮。不能仅根据扩展名判断一个文件是否完整：程序会优先检查文件内容，ZIP 容器即使名为 `.eprj3` 也会尝试读取。未知单文件格式会明确提示未识别，不会断言其不完整。
 
-参考：[官方 EPRJ3 skill 格式说明](https://github.com/easyeda/easyeda-eprj3-skill/blob/main/docs/format-reference.md)。单文件导出可能与目录格式不同，目前只支持 ZIP 内含一个 `.epcb2` 的归档，不宣称覆盖所有单文件容器。
+参考：[官方 EPRJ3 skill 格式说明](https://github.com/easyeda/easyeda-eprj3-skill/blob/main/docs/format-reference.md)。单文件导出可能与目录格式不同，目前支持 ZIP 内含 `.epcb2` 的归档（多板时需选择），不宣称覆盖所有单文件容器。
 
-支持上传单个 `.epcb2` 或包含一个 PCB 的完整项目 ZIP，也可从本地项目路径启动：
+支持上传单个 `.epcb2` 或完整项目 ZIP，也可从本地项目路径启动。多个 PCB 时会列出列表，让你明确选择，不会默认取第一个：
 
 ```bash
 python app.py --project /path/to/project/project.eprj3
@@ -69,3 +69,36 @@ python -m unittest discover -s tests -v
 - 演示板 24 V、5 A 单负载：h=0.5 / 0.25 / 0.125 mm 时最大压降分别 9.7220 / 9.7220 / 9.6995 mV，铜损 48.0455 / 48.0406 / 47.9244 mW。这只是该演示模型的收敛，不是普遍误差保证。
 - 官方 easyeda-pro-eprj3-format 示例 PCB1 导入 26 个引脚、131 铜多边形、1 个 PTH。跨层 PTH 源到 C2.1 的 GND 连通求解通过；孤立 C1.1 与 VCC 引脚断路被拒绝。示例源文件未随包分发。
 - 本地 HTTP 服务、示例加载、求解 API、跨域写入拒绝均有自动测试。
+
+## Windows 启动
+
+安装 Python 3 后，在程序目录的终端运行（无需修改 PowerShell 执行策略）：
+
+```bat
+cd pcb_dc
+py -3 -m venv .venv
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe app.py
+```
+
+浏览器打开 `http://127.0.0.1:8765`。
+
+## 原生目录与多 PCB 选择
+
+推荐点击 **选择工程文件夹**，选择包含 `.eprj3` 和 `pcb/` 的完整工程目录。也可以选择包含多个工程的父目录；浏览器只将你选择的 PCB 文档传给本机求解器，不上传到远端。`sch/`、`panel/` 和 `.epro2` 备份不参与压降求解。
+
+或在界面“本机工程目录或 .eprj3 路径”中粘贴路径，再点“读取路径”。这里的路径指 **运行 Python 服务的那台电脑**，不是浏览器所在电脑。支持中文和空格。路径不存在、无 `pcb/*.epcb2` 或选项不匹配时明确报错；只扫描工程根与一级工程子目录，不扫所有备份。
+
+例如 Windows（命令提示符）：
+
+```bat
+python app.py --project "C:\项目\焯 电2\焯 电2.eprj3"
+```
+
+若有 `PCB1.epcb2` 和 `PCB1_1.epcb2`，打开界面后选择目标板，再点“载入此 PCB”。也可明确指定：
+
+```bat
+python app.py --project "C:\项目\焯 电2" --pcb "pcb/PCB1_1.epcb2"
+```
+
+完整工程 ZIP 含多个 PCB 时同样显示选择列表。读入单独索引文件时，浏览器无权自动读取旁边文件；此时请选工程文件夹，或使用本机路径入口。文件夹选择依赖浏览器的目录选择功能；不支持的浏览器可用路径或 ZIP 入口。目录、多板与路径功能已有自动测试，但尚未在真实 Windows/嘉立创客户端点击验证。

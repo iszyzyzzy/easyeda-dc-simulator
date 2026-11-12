@@ -34,6 +34,16 @@ def solve(project,config):
  lo,hi=pts.min(0),pts.max(0);nx,ny=np.ceil((hi-lo)/h).astype(int)
  if min(nx,ny)<1 or nx*ny*len(lids)>160000:raise ValueError('Mesh too large or empty; increase grid spacing (160000 candidate-cell limit)')
  xx,yy=np.meshgrid(lo[0]+(np.arange(nx)+.5)*h,lo[1]+(np.arange(ny)+.5)*h)
+ drills=project.get('drills')
+ if drills is None:
+  # 旧 JSON 只在过孔上保存孔径；新导入器的独立轮廓保留偏心孔和槽孔。
+  drills=[]
+  for via in project.get('vias',[]):
+   radius=number(via['drill_mm'],'drill_mm')/2
+   if radius<=0:raise ValueError('钻孔直径必须大于零')
+   x,y=number(via['x'],'via x'),number(via['y'],'via y')
+   polygon=[[x+radius*math.cos(i*math.tau/64),y+radius*math.sin(i*math.tau/64)] for i in range(64)]
+   drills.append({'layers':via['layers'],'polygon':polygon})
  maps={};total=0
  for lid in lids:
   mask=np.zeros(xx.shape,bool)
@@ -42,6 +52,10 @@ def solve(project,config):
    hit=inside(xx,yy,c['polygon'])
    for hole in c.get('holes',[]):hit&=~inside(xx,yy,hole)
    mask|=hit
+  # 实际钻孔会切掉走线和焊盘，不能被后来并入的铜重新填满。
+  for drill in drills:
+   if lid in [str(layer) for layer in drill['layers']]:
+    mask&=~inside(xx,yy,drill['polygon'])
   m=np.full(xx.shape,-1,int);n=int(mask.sum());m[mask]=np.arange(total,total+n);total+=n;maps[lid]=m
  if not total:raise ValueError('Mesh contains no copper')
  rho=RHO*(1+.00393*(number(config.get('copper_temperature_c',20),'temperature')-20))

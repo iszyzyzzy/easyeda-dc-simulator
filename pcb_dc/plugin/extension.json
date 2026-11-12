@@ -1,0 +1,12 @@
+{
+  "name":"pcb-dc-readonly-export",
+  "uuid":"cb47cb987ee14a40b5ab623f62af434d",
+  "displayName":"PCB DC Lab 只读导出",
+  "description":"从当前 PCB 导出指定网络的实际铺铜、走线、焊盘和通孔；本地压降原型配套工具。",
+  "version":"0.1.0",
+  "publisher":"iszyzyzzy",
+  "engines":{"eda":"^3.2.0"},
+  "categories":"PCB",
+  "entry":"./dist/index",
+  "headerMenus":{"pcb":[{"id":"pcb_dc_export_menu","title":"PCB DC Lab","menuItems":[{"id":"pcb_dc_export_net","title":"只读导出当前网络…","registerFn":"exportNetwork"}]}]}
+}
