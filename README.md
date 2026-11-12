@@ -22,7 +22,9 @@ python app.py
 
 ## 嘉立创专业版 V3 项目
 
-新版 `.eprj3` 是项目索引，实际 PCB 位于 `pcb/*.epcb2`。仅上传索引不能得到铜皮。
+官方文档描述的 **文件夹格式** `.eprj3`（JSON 中 `format: "folder"`）是项目索引，实际 PCB 位于 `pcb/*.epcb2`，仅上传这种索引不能得到铜皮。不能仅根据扩展名判断一个文件是否完整：程序会优先检查文件内容，ZIP 容器即使名为 `.eprj3` 也会尝试读取。未知单文件格式会明确提示未识别，不会断言其不完整。
+
+参考：[官方 EPRJ3 skill 格式说明](https://github.com/easyeda/easyeda-eprj3-skill/blob/main/docs/format-reference.md)。单文件导出可能与目录格式不同，目前只支持 ZIP 内含一个 `.epcb2` 的归档，不宣称覆盖所有单文件容器。
 
 支持上传单个 `.epcb2` 或包含一个 PCB 的完整项目 ZIP，也可从本地项目路径启动：
 

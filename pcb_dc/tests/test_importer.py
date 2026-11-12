@@ -46,4 +46,22 @@ class ImporterTests(unittest.TestCase):
   b=io.BytesIO()
   with zipfile.ZipFile(b,'w') as z:z.writestr('pcb/a.epcb2',rec('DOCHEAD','',{'docType':'PCB'}))
   self.assertEqual(load_project_bytes(b.getvalue(),'x.zip')['units'],'mm')
+ def test_zip_eprj3_extension_bytes_and_path(self):
+  import tempfile
+  b=io.BytesIO()
+  with zipfile.ZipFile(b,'w') as z:z.writestr('pcb/a.epcb2',rec('DOCHEAD','',{'docType':'PCB'}))
+  self.assertEqual(load_project_bytes(b.getvalue(),'x.eprj3')['units'],'mm')
+  with tempfile.TemporaryDirectory() as td:
+   p=Path(td)/'x.eprj3';p.write_bytes(b.getvalue())
+   self.assertEqual(load_project(p)['units'],'mm')
+ def test_folder_index_path_and_upload_message(self):
+  import tempfile
+  data=b'{"format":"folder"}'
+  with self.assertRaisesRegex(ImportErrorDetail,'folder-format project index'):load_project_bytes(data,'x.eprj3')
+  with tempfile.TemporaryDirectory() as td:
+   p=Path(td)/'x.eprj3';p.write_bytes(data);(p.parent/'pcb').mkdir()
+   (p.parent/'pcb'/'a.epcb2').write_text(rec('DOCHEAD','',{'docType':'PCB'}))
+   self.assertEqual(load_project(p)['units'],'mm')
+ def test_unknown_eprj3_not_claimed_incomplete(self):
+  with self.assertRaisesRegex(ImportErrorDetail,'Unrecognised standalone'):load_project_bytes(b'unknown data','x.eprj3')
 if __name__=='__main__':unittest.main()

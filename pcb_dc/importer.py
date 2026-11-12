@@ -242,11 +242,20 @@ def convert(text,name='PCB'):
 
 def load_project(path):
  p=Path(path)
- if p.is_dir() or p.suffix.lower()=='.eprj3':
-  root=p if p.is_dir() else p.parent;files=sorted(root.glob('pcb/*.epcb2'))
+ if p.is_dir():
+  root=p;files=sorted(root.glob('pcb/*.epcb2'))
   if len(files)!=1:raise ImportErrorDetail(f'Found {len(files)} PCB files; select a specific .epcb2 file')
   p=files[0]
- return load_project_bytes(p.read_bytes(),p.name)
+ data=p.read_bytes()
+ # Content takes precedence: a single archive may use a project extension.
+ if not zipfile.is_zipfile(io.BytesIO(data)) and p.suffix.lower()=='.eprj3':
+  try:index=json.loads(data.decode('utf-8-sig'))
+  except (ValueError,UnicodeError):index=None
+  if isinstance(index,dict) and index.get('format')=='folder':
+   files=sorted(p.parent.glob('pcb/*.epcb2'))
+   if len(files)!=1:raise ImportErrorDetail(f'Folder-format index needs its sibling pcb/ documents; found {len(files)} PCB files. Select one .epcb2 or the complete project archive.')
+   return load_project(files[0])
+ return load_project_bytes(data,p.name)
 def load_project_bytes(data,filename='board.epcb2'):
  if zipfile.is_zipfile(io.BytesIO(data)):
   with zipfile.ZipFile(io.BytesIO(data)) as z:
@@ -254,7 +263,12 @@ def load_project_bytes(data,filename='board.epcb2'):
    if len(names)!=1:raise ImportErrorDetail(f'Archive has {len(names)} PCB files; select one .epcb2')
    if z.getinfo(names[0]).file_size>100_000_000:raise ImportErrorDetail('PCB larger than 100 MB')
    return convert(z.read(names[0]).decode('utf-8-sig'),names[0])
- if filename.lower().endswith('.eprj3'):raise ImportErrorDetail('EPRJ3 is only an index: upload complete project ZIP or pcb/<name>.epcb2')
+ if filename.lower().endswith('.eprj3'):
+  try:index=json.loads(data.decode('utf-8-sig'))
+  except (ValueError,UnicodeError):index=None
+  if isinstance(index,dict) and index.get('format')=='folder':
+   raise ImportErrorDetail('This file is a folder-format project index, not the PCB geometry. Upload its complete project ZIP or pcb/<name>.epcb2.')
+  raise ImportErrorDetail('Unrecognised standalone .eprj3 contents. This importer supports ZIP containers with one .epcb2 and folder-format indexes with companion files; do not assume this file is incomplete.')
  if filename.lower().endswith('.json'):return json.loads(data.decode('utf-8-sig'))
  return convert(data.decode('utf-8-sig'),filename)
 if __name__=='__main__':
